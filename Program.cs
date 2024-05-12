@@ -2,6 +2,9 @@
 using Newtonsoft.Json;
 using System.Net;
 using System.Net.Mail;
+using System.Security.Cryptography;
+
+
 
 string[] actions = new string[] // Список действий
 {
@@ -17,15 +20,20 @@ string[] actions = new string[] // Список действий
     "---------------------------------------------------"
 };
 string path = "persons.json";
+
 string name; // имя текущего пользователя для взаимодействия
+string login; // логин текущего пользователя для взаимодействия
+string phone; // телефон текущего пользователя для взаимодействия
+string password;
 Person person; // текущий пользователь
 ConsoleKey inputKey; 
-var personsJson = File.ReadAllText(path);
 
 
 if (!File.Exists(path)) File.Create(path);
-List<Person> persons = JsonConvert.DeserializeObject<List<Person>>(personsJson) ?? new List<Person>();
+var personsJson = File.ReadAllText(path);
 
+
+List<Person> persons = JsonConvert.DeserializeObject<List<Person>>(personsJson) ?? new List<Person>();
 do
 {
     
@@ -42,6 +50,8 @@ do
             foreach (var _person in persons) Console.WriteLine(_person + "\n");
             Console.WriteLine("--------------------");
             break;
+
+
         // Добавить пользователя
         case ConsoleKey.B:
             Console.Clear();
@@ -59,37 +69,54 @@ do
             catch (InvalidDataException e)
             {
                 Console.WriteLine("ERROR: " + e.Message);
+                Console.WriteLine("----Нажмите любую кнопку чтобы начать заново----");
+                Console.ReadKey();
+                goto case ConsoleKey.B;
             }
             break;
+
+
         // Удалить пользователя
         case ConsoleKey.C:
             Console.Clear();
-            PrintNames();
-            Console.WriteLine("введите полное имя пользователя, которого хотите удалить:");
-            name = Console.ReadLine();
-            if (persons.RemoveAll(person => person.Name.Contains(name)) > 0)
-                Console.WriteLine("Пользователь удален"); 
-            else Console.WriteLine("Пользователь не найден");
+            person = GetPersonByOptions("удалить пользователя");
+            if (person is not null)
+            {
+                if (VerificatePersonPassword(person.Password))
+                {
+                    persons.Remove(person);
+                    Console.WriteLine("----Пользователь удален----");
+                }
+                else Console.WriteLine("----Пароль не верный----");
+            }
+            else Console.WriteLine("----Пользователь не найден----");
             break;
+
+        // Изменить пользователя
         case ConsoleKey.D:
             Console.Clear();
-            PrintNames();
-            Console.WriteLine("введите полное имя пользователя, чьи данные хотите изменить");
-            name = Console.ReadLine();
-            person = persons.Find(person => person.Name.Contains(name));
-            try
+            person = GetPersonByOptions("изменить пользователя");
+            if (person is not null)
             {
-                Console.WriteLine("введите ФИО (ФИО должны быть с большой буквы и не содержать цифры): "); person.Name = Console.ReadLine();
-                Console.WriteLine("введите номер телефона: "); person.SetPhone(Console.ReadLine());
-                Console.WriteLine("введите почту: "); person.Email = Console.ReadLine();
-                Console.WriteLine("введите логин: "); person.Login = Console.ReadLine();
-                Console.WriteLine("введите пароль (пароль должен не менее 8 символов, содержать как минимум одну заглавную букву, одну строчную, одну цифру, один специальный символ): "); person.SetPassword(Console.ReadLine());
-                Console.WriteLine("----Данные успешно изменены----");
+                if (VerificatePersonPassword(person.Password))
+                {
+                    try
+                    {
+                        Console.WriteLine("введите ФИО (ФИО должны быть с большой буквы и не содержать цифры): "); person.Name = Console.ReadLine();
+                        Console.WriteLine("введите номер телефона: "); person.SetPhone(Console.ReadLine());
+                        Console.WriteLine("введите почту: "); person.Email = Console.ReadLine();
+                        Console.WriteLine("введите логин: "); person.Login = Console.ReadLine();
+                        Console.WriteLine("введите пароль (пароль должен не менее 8 символов, содержать как минимум одну заглавную букву, одну строчную, одну цифру, один специальный символ): "); person.SetPassword(Console.ReadLine());
+                        Console.WriteLine("----Данные успешно изменены----");
+                    }
+                    catch (InvalidDataException e)
+                    {
+                        Console.WriteLine("ERROR: " + e.Message);
+                    }
+                }
+                else Console.WriteLine("----Пароль не верный----");
             }
-            catch(InvalidDataException e)
-            {
-                Console.WriteLine("ERROR: " + e.Message);
-            }
+            else Console.WriteLine("----Пользователь не найден----");
             break;
         // Сохранить изменения в файл
         case ConsoleKey.E:
@@ -99,13 +126,14 @@ do
         // Отправить сообщение на e-mail пользователя
         case ConsoleKey.F:
             Console.Clear();
-            PrintNames();
-            Console.WriteLine("введите полное имя пользователя, на чью почту хотите отправить сообщение:");
-            name = Console.ReadLine();
-            person = persons.Find(person =>  person.Name.Contains(name));
-            Console.WriteLine("введите сообщение для отправки:");
-            var message = Console.ReadLine();
-            SendMessageToEmail(message, person.Email);
+            person = GetPersonByOptions("отправить сообщение на почту");
+            if (person is not null)
+            {
+                Console.WriteLine("введите сообщение для отправки:");
+                var message = Console.ReadLine();
+                SendMessageToEmail(message, person.Email);
+            }
+            else Console.WriteLine("----Пользователь не найден----");
             break;
         // Отсортировать по выбранному полю
         case ConsoleKey.G:
@@ -146,8 +174,48 @@ do
 
 } while (inputKey != ConsoleKey.Q);
 
-
-void PrintNames()
+Person? GetPersonByOptions(string forWhat)
+{
+    int option;
+    Console.WriteLine("1 -- ФИО\n2 -- Логин\n3 -- Телефон");
+    Console.WriteLine($"выберите свойство, по которому хотите {forWhat}:");
+    option = Convert.ToInt32(Console.ReadLine());
+    switch (option)
+    {
+        case 1:
+            PrintExistNames();
+            Console.WriteLine("введите имя:");
+            name = Console.ReadLine();
+            login = phone = string.Empty;
+            break;
+        case 2:
+            PrintExistLogins();
+            Console.WriteLine("введите логин:");
+            login = Console.ReadLine();
+            name = phone = string.Empty;
+            break;
+        case 3:
+            PrintExistPhones();
+            Console.WriteLine("введите телефон:");
+            phone = Console.ReadLine();
+            login = name = string.Empty;
+            break;
+        default:
+            name = login = phone = string.Empty;
+            break;
+    }
+    return persons.Find(person => person.Name.Contains(name) || person.Phone.Contains(phone) || person.Login.Contains(login));
+}
+bool VerificatePersonPassword(string correctHash)
+{
+    Console.WriteLine("введите пароль данного пользователя");
+    password = Console.ReadLine();
+    var passwordBytes = System.Text.Encoding.UTF8.GetBytes(password);
+    var hash = Convert.ToHexString(SHA256.Create().ComputeHash(passwordBytes));
+    if (hash  == correctHash) return true;
+    return false;
+}
+void PrintExistNames()
 {
     var names = from person in persons select person.Name;
     Console.WriteLine("----Доступные имена пользователей----");
@@ -155,13 +223,28 @@ void PrintNames()
         Console.WriteLine(name);
     Console.WriteLine("-------------------------------------");
 }
+void PrintExistLogins()
+{
+    var logins = from person in persons select person.Login;
+    Console.WriteLine("----Доступные имена пользователей----");
+    foreach (var login in logins)
+        Console.WriteLine(login);
+    Console.WriteLine("-------------------------------------");
+}
+void PrintExistPhones()
+{
+    var phones = from person in persons select person.Phone;
+    Console.WriteLine("----Доступные имена пользователей----");
+    foreach (var phone in phones)
+        Console.WriteLine(phone);
+    Console.WriteLine("-------------------------------------");
+}
 void SaveChanges(List<Person> persons)
 {   
     var serializePersons = JsonConvert.SerializeObject(persons, Formatting.Indented);
     File.WriteAllText(path, serializePersons);
-    Console.WriteLine("Изменения сохранены в файл");
+    Console.WriteLine("----Изменения сохранены в файл----");
 }
-
 void SendMessageToEmail(string message, string recipient)
 {
     using SmtpClient smtpClient = new SmtpClient("smtp.yandex.ru", 587);
@@ -177,7 +260,7 @@ void SendMessageToEmail(string message, string recipient)
     try
     {
         smtpClient.Send(mailMessage);
-        Console.WriteLine("Письмо успешно отправлено");
+        Console.WriteLine("----Письмо успешно отправлено----");
     }
     catch (Exception e)
     {
